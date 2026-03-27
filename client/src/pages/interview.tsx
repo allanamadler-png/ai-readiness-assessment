@@ -59,15 +59,14 @@ export default function InterviewPage() {
             height="28"
             viewBox="0 0 32 32"
             fill="none"
-            aria-label="Interview Agent logo"
+            aria-label="AI Readiness logo"
           >
             <rect x="2" y="2" width="28" height="28" rx="6" stroke="currentColor" strokeWidth="2" className="text-foreground" />
-            <circle cx="12" cy="13" r="2" fill="currentColor" className="text-foreground" />
-            <circle cx="20" cy="13" r="2" fill="currentColor" className="text-foreground" />
-            <path d="M10 20 C10 22 13 25 16 25 C19 25 22 22 22 20" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="text-foreground" fill="none" />
+            <path d="M10 22 L16 10 L22 22" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-foreground" fill="none" />
+            <line x1="12" y1="18" x2="20" y2="18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="text-foreground" />
           </svg>
           <h1 className="text-base font-semibold tracking-tight" data-testid="text-app-title">
-            Interview Agent
+            AI Readiness Assessment
           </h1>
         </div>
       </header>

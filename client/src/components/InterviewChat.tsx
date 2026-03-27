@@ -4,85 +4,118 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { Session, Message } from "@shared/schema";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Send, Loader2, Square } from "lucide-react";
+import { Progress } from "@/components/ui/progress";
+import { Badge } from "@/components/ui/badge";
+import {
+  Send,
+  Loader2,
+  Square,
+  CheckCircle2,
+  FileText,
+  ScrollText,
+} from "lucide-react";
+import { useLocation } from "wouter";
 
-// Simple markdown formatting for agent messages
 function formatMessage(text: string): string {
   return text
+    .replace(/\[INTERVIEW_COMPLETE\]/g, "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-    .replace(/\*(.+?)\*/g, "<em>$1</em>");
+    .replace(/\*(.+?)\*/g, "<em>$1</em>")
+    .trim();
 }
 
 interface Props {
   session: Session;
 }
 
-export function InterviewChat({ session }: Props) {
+export function InterviewChat({ session: initialSession }: Props) {
+  const [, navigate] = useLocation();
   const [input, setInput] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [hasStarted, setHasStarted] = useState(false);
+  const [isCompleted, setIsCompleted] = useState(initialSession.status === "completed");
+
+  // Re-fetch session to get live question count
+  const { data: session } = useQuery<Session>({
+    queryKey: ["/api/sessions", initialSession.id],
+    queryFn: async () => {
+      const res = await apiRequest("GET", `/api/sessions/${initialSession.id}`);
+      return res.json();
+    },
+    initialData: initialSession,
+  });
+
+  const currentSession = session || initialSession;
 
   // Fetch messages
-  const {
-    data: messages = [],
-    isLoading,
-  } = useQuery<Message[]>({
-    queryKey: ["/api/sessions", session.id, "messages"],
+  const { data: messages = [], isLoading } = useQuery<Message[]>({
+    queryKey: ["/api/sessions", currentSession.id, "messages"],
     queryFn: async () => {
-      const res = await apiRequest(
-        "GET",
-        `/api/sessions/${session.id}/messages`
-      );
+      const res = await apiRequest("GET", `/api/sessions/${currentSession.id}/messages`);
       return res.json();
     },
     refetchInterval: false,
   });
 
-  // Start interview (agent sends first message)
+  // Start interview
   const startMutation = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest(
-        "POST",
-        `/api/sessions/${session.id}/start`
-      );
+      const res = await apiRequest("POST", `/api/sessions/${currentSession.id}/start`);
       return res.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["/api/sessions", session.id, "messages"],
-      });
+      queryClient.invalidateQueries({ queryKey: ["/api/sessions", currentSession.id, "messages"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/sessions", currentSession.id] });
     },
   });
 
   // Send user message
   const sendMutation = useMutation({
     mutationFn: async (content: string) => {
-      const res = await apiRequest(
-        "POST",
-        `/api/sessions/${session.id}/messages`,
-        { content }
-      );
+      const res = await apiRequest("POST", `/api/sessions/${currentSession.id}/messages`, { content });
+      return res.json();
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/sessions", currentSession.id, "messages"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/sessions", currentSession.id] });
+      setInput("");
+      if (data.completed) {
+        setIsCompleted(true);
+      }
+    },
+  });
+
+  // End interview manually
+  const endMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", `/api/sessions/${currentSession.id}/end`);
       return res.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["/api/sessions", session.id, "messages"],
-      });
-      setInput("");
+      setIsCompleted(true);
+      queryClient.invalidateQueries({ queryKey: ["/api/sessions", currentSession.id] });
+      queryClient.invalidateQueries({ queryKey: ["/api/sessions"] });
     },
   });
 
   // Auto-start interview on mount
   useEffect(() => {
-    if (!hasStarted && messages.length === 0 && !isLoading) {
+    if (!hasStarted && messages.length === 0 && !isLoading && !isCompleted) {
       setHasStarted(true);
       startMutation.mutate();
     }
-  }, [messages, isLoading, hasStarted]);
+  }, [messages, isLoading, hasStarted, isCompleted]);
+
+  // Detect completion from session status
+  useEffect(() => {
+    if (currentSession.status === "completed") {
+      setIsCompleted(true);
+    }
+  }, [currentSession.status]);
 
   // Auto-scroll on new messages
   useEffect(() => {
@@ -105,20 +138,53 @@ export function InterviewChat({ session }: Props) {
   };
 
   const isAgentThinking = startMutation.isPending || sendMutation.isPending;
+  const progressPct = currentSession.maxQuestions > 0
+    ? Math.min(100, (currentSession.questionCount / currentSession.maxQuestions) * 100)
+    : 0;
 
   return (
     <div className="flex flex-col h-full">
       {/* Session info bar */}
-      <div className="border-b border-border px-4 py-2 bg-card/50 shrink-0">
-        <p
-          className="text-sm font-medium truncate"
-          data-testid="text-session-title"
-        >
-          {session.title}
-        </p>
-        <p className="text-xs text-muted-foreground truncate">
-          Objective: {session.objective}
-        </p>
+      <div className="border-b border-border px-4 py-2.5 bg-card/50 shrink-0">
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-sm font-medium truncate" data-testid="text-session-title">
+              {currentSession.title}
+            </p>
+            <p className="text-xs text-muted-foreground truncate">
+              {currentSession.intervieweeName}
+              {currentSession.intervieweeRole && ` · ${currentSession.intervieweeRole}`}
+              {" · Wave "}{currentSession.wave}
+            </p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {isCompleted ? (
+              <Badge variant="secondary" className="gap-1">
+                <CheckCircle2 className="h-3 w-3" />
+                Complete
+              </Badge>
+            ) : (
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => endMutation.mutate()}
+                disabled={endMutation.isPending}
+                data-testid="button-end-interview"
+                className="text-xs"
+              >
+                <Square className="h-3 w-3 mr-1" />
+                End Interview
+              </Button>
+            )}
+          </div>
+        </div>
+        {/* Question progress bar */}
+        <div className="mt-2 flex items-center gap-2">
+          <Progress value={progressPct} className="flex-1 h-1.5" data-testid="progress-questions" />
+          <span className="text-[11px] font-mono text-muted-foreground shrink-0">
+            {currentSession.questionCount}/{currentSession.maxQuestions}
+          </span>
+        </div>
       </div>
 
       {/* Messages */}
@@ -136,9 +202,7 @@ export function InterviewChat({ session }: Props) {
         {messages.map((msg) => (
           <div
             key={msg.id}
-            className={`flex ${
-              msg.role === "user" ? "justify-end" : "justify-start"
-            }`}
+            className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
             data-testid={`message-${msg.role}-${msg.id}`}
           >
             <div
@@ -153,7 +217,10 @@ export function InterviewChat({ session }: Props) {
                   Interviewer
                 </p>
               )}
-              <p className="whitespace-pre-wrap" dangerouslySetInnerHTML={{ __html: formatMessage(msg.content) }} />
+              <p
+                className="whitespace-pre-wrap"
+                dangerouslySetInnerHTML={{ __html: formatMessage(msg.content) }}
+              />
             </div>
           </div>
         ))}
@@ -166,14 +233,47 @@ export function InterviewChat({ session }: Props) {
               </p>
               <div className="flex items-center gap-1.5">
                 <span className="w-1.5 h-1.5 bg-muted-foreground rounded-full animate-pulse" />
-                <span
-                  className="w-1.5 h-1.5 bg-muted-foreground rounded-full animate-pulse"
-                  style={{ animationDelay: "200ms" }}
-                />
-                <span
-                  className="w-1.5 h-1.5 bg-muted-foreground rounded-full animate-pulse"
-                  style={{ animationDelay: "400ms" }}
-                />
+                <span className="w-1.5 h-1.5 bg-muted-foreground rounded-full animate-pulse" style={{ animationDelay: "200ms" }} />
+                <span className="w-1.5 h-1.5 bg-muted-foreground rounded-full animate-pulse" style={{ animationDelay: "400ms" }} />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Completion banner */}
+        {isCompleted && messages.length > 0 && (
+          <div className="flex justify-center py-4" data-testid="status-completed">
+            <div className="bg-muted/50 border border-border rounded-lg px-5 py-4 text-center max-w-sm">
+              <CheckCircle2 className="h-6 w-6 text-primary mx-auto mb-2" />
+              <p className="text-sm font-medium mb-1">Interview Complete</p>
+              <p className="text-xs text-muted-foreground mb-3">
+                {currentSession.completionReason === "agent_decided"
+                  ? "The interviewer gathered sufficient information."
+                  : currentSession.completionReason === "max_reached"
+                  ? "The question limit was reached."
+                  : "The interview was ended manually."}
+              </p>
+              <div className="flex gap-2 justify-center">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => navigate(`/transcript/${currentSession.id}`)}
+                  className="text-xs"
+                  data-testid="button-view-transcript"
+                >
+                  <FileText className="h-3.5 w-3.5 mr-1" />
+                  Transcript
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => navigate(`/script/${currentSession.id}`)}
+                  className="text-xs"
+                  data-testid="button-view-script"
+                >
+                  <ScrollText className="h-3.5 w-3.5 mr-1" />
+                  Script
+                </Button>
               </div>
             </div>
           </div>
@@ -181,37 +281,39 @@ export function InterviewChat({ session }: Props) {
       </div>
 
       {/* Input */}
-      <div className="border-t border-border p-3 shrink-0">
-        <div className="flex gap-2 items-end max-w-3xl mx-auto">
-          <Textarea
-            ref={textareaRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Type your response..."
-            rows={1}
-            disabled={isAgentThinking}
-            className="resize-none min-h-[42px] max-h-[120px]"
-            data-testid="input-message"
-          />
-          <Button
-            size="icon"
-            disabled={!input.trim() || isAgentThinking}
-            onClick={handleSend}
-            className="shrink-0 h-[42px] w-[42px]"
-            data-testid="button-send"
-          >
-            {isAgentThinking ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Send className="h-4 w-4" />
-            )}
-          </Button>
+      {!isCompleted && (
+        <div className="border-t border-border p-3 shrink-0">
+          <div className="flex gap-2 items-end max-w-3xl mx-auto">
+            <Textarea
+              ref={textareaRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Type your response..."
+              rows={1}
+              disabled={isAgentThinking}
+              className="resize-none min-h-[42px] max-h-[120px]"
+              data-testid="input-message"
+            />
+            <Button
+              size="icon"
+              disabled={!input.trim() || isAgentThinking}
+              onClick={handleSend}
+              className="shrink-0 h-[42px] w-[42px]"
+              data-testid="button-send"
+            >
+              {isAgentThinking ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Send className="h-4 w-4" />
+              )}
+            </Button>
+          </div>
+          <p className="text-[11px] text-muted-foreground text-center mt-1.5">
+            Press Enter to send, Shift+Enter for new line
+          </p>
         </div>
-        <p className="text-[11px] text-muted-foreground text-center mt-1.5">
-          Press Enter to send, Shift+Enter for new line
-        </p>
-      </div>
+      )}
     </div>
   );
 }

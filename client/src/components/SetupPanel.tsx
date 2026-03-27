@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import type { Session } from "@shared/schema";
 import { Button } from "@/components/ui/button";
@@ -7,7 +7,15 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Card } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
-import { Plus, X, BookOpen, Target, Loader2 } from "lucide-react";
+import { Slider } from "@/components/ui/slider";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Plus, X, BookOpen, Target, Loader2, User, Hash, FileText } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 interface KnowledgeEntry {
@@ -21,17 +29,53 @@ interface Props {
 
 export function SetupPanel({ onSessionCreated }: Props) {
   const { toast } = useToast();
+
+  // Interview config
   const [title, setTitle] = useState("");
   const [objective, setObjective] = useState("");
+
+  // Interviewee info
+  const [intervieweeName, setIntervieweeName] = useState("");
+  const [intervieweeEmail, setIntervieweeEmail] = useState("");
+  const [intervieweeRole, setIntervieweeRole] = useState("");
+
+  // Wave & limits
+  const [wave, setWave] = useState("1");
+  const [maxQuestions, setMaxQuestions] = useState(12);
+
+  // Script
+  const [customScript, setCustomScript] = useState("");
+  const [showScript, setShowScript] = useState(false);
+
+  // Knowledge base
   const [entries, setEntries] = useState<KnowledgeEntry[]>([
     { label: "", content: "" },
   ]);
+
+  // Get existing waves for the selector
+  const { data: existingWaves = [] } = useQuery<number[]>({
+    queryKey: ["/api/waves"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/waves");
+      return res.json();
+    },
+  });
+
+  const waveOptions = Array.from(
+    new Set([...existingWaves, 1, 2, 3])
+  ).sort((a, b) => a - b);
 
   const createMutation = useMutation({
     mutationFn: async () => {
       const res = await apiRequest("POST", "/api/sessions", {
         title: title.trim(),
+        intervieweeName: intervieweeName.trim(),
+        intervieweeEmail: intervieweeEmail.trim() || undefined,
+        intervieweeRole: intervieweeRole.trim() || undefined,
         objective: objective.trim(),
+        wave: Number(wave),
+        maxQuestions,
+        script: customScript.trim() || undefined,
         knowledgeEntries: entries.filter(
           (e) => e.label.trim() && e.content.trim()
         ),
@@ -50,19 +94,9 @@ export function SetupPanel({ onSessionCreated }: Props) {
     },
   });
 
-  const addEntry = () => {
-    setEntries([...entries, { label: "", content: "" }]);
-  };
-
-  const removeEntry = (index: number) => {
-    setEntries(entries.filter((_, i) => i !== index));
-  };
-
-  const updateEntry = (
-    index: number,
-    field: "label" | "content",
-    value: string
-  ) => {
+  const addEntry = () => setEntries([...entries, { label: "", content: "" }]);
+  const removeEntry = (index: number) => setEntries(entries.filter((_, i) => i !== index));
+  const updateEntry = (index: number, field: "label" | "content", value: string) => {
     const updated = [...entries];
     updated[index] = { ...updated[index], [field]: value };
     setEntries(updated);
@@ -70,8 +104,11 @@ export function SetupPanel({ onSessionCreated }: Props) {
 
   const isValid =
     title.trim().length > 0 &&
+    intervieweeName.trim().length > 0 &&
     objective.trim().length > 0 &&
     entries.some((e) => e.label.trim() && e.content.trim());
+
+  const estMinutes = Math.round(maxQuestions * 1.5);
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-6 space-y-6 overflow-y-auto h-full">
@@ -80,17 +117,57 @@ export function SetupPanel({ onSessionCreated }: Props) {
           Configure Interview
         </h2>
         <p className="text-sm text-muted-foreground mt-1">
-          Define the objective the agent should pursue and the knowledge it
-          uses to guide its questions.
+          Define the objective, interviewee details, and knowledge base for the agent.
         </p>
+      </div>
+
+      {/* Interviewee Info Section */}
+      <div className="space-y-3">
+        <Label className="flex items-center gap-1.5 text-sm font-medium">
+          <User className="h-3.5 w-3.5" />
+          Interviewee
+        </Label>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="space-y-1.5">
+            <Label htmlFor="name" className="text-xs text-muted-foreground">Name *</Label>
+            <Input
+              id="name"
+              placeholder="Jane Smith"
+              value={intervieweeName}
+              onChange={(e) => setIntervieweeName(e.target.value)}
+              data-testid="input-interviewee-name"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="email" className="text-xs text-muted-foreground">Email</Label>
+            <Input
+              id="email"
+              type="email"
+              placeholder="jane@company.com"
+              value={intervieweeEmail}
+              onChange={(e) => setIntervieweeEmail(e.target.value)}
+              data-testid="input-interviewee-email"
+            />
+          </div>
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="role" className="text-xs text-muted-foreground">Role / Title</Label>
+          <Input
+            id="role"
+            placeholder="Senior Engineer, Marketing Director, etc."
+            value={intervieweeRole}
+            onChange={(e) => setIntervieweeRole(e.target.value)}
+            data-testid="input-interviewee-role"
+          />
+        </div>
       </div>
 
       {/* Title */}
       <div className="space-y-2">
-        <Label htmlFor="title">Interview Title</Label>
+        <Label htmlFor="title">Interview Title *</Label>
         <Input
           id="title"
-          placeholder="e.g. Candidate Assessment — Senior Engineer"
+          placeholder="e.g. Organizational Culture Assessment — Wave 1"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           data-testid="input-title"
@@ -101,11 +178,11 @@ export function SetupPanel({ onSessionCreated }: Props) {
       <div className="space-y-2">
         <Label htmlFor="objective" className="flex items-center gap-1.5">
           <Target className="h-3.5 w-3.5" />
-          Interview Objective
+          Interview Objective *
         </Label>
         <Textarea
           id="objective"
-          placeholder="What should the agent try to learn? e.g. 'Assess the candidate's system design experience, probe for depth on distributed systems, evaluate leadership and communication skills.'"
+          placeholder="What should the agent try to learn? e.g. 'Understand employee perspectives on organizational culture, identify pain points in communication and collaboration, surface opportunities for leadership development.'"
           value={objective}
           onChange={(e) => setObjective(e.target.value)}
           rows={3}
@@ -116,16 +193,56 @@ export function SetupPanel({ onSessionCreated }: Props) {
         </p>
       </div>
 
+      {/* Wave & Question Limits */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label className="flex items-center gap-1.5">
+            <Hash className="h-3.5 w-3.5" />
+            Wave
+          </Label>
+          <Select value={wave} onValueChange={setWave}>
+            <SelectTrigger data-testid="select-wave">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {waveOptions.map((w) => (
+                <SelectItem key={w} value={String(w)}>
+                  Wave {w}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            Group interviews by wave to refine focus over time.
+          </p>
+        </div>
+        <div className="space-y-2">
+          <Label>Max Questions: {maxQuestions}</Label>
+          <div className="pt-2">
+            <Slider
+              value={[maxQuestions]}
+              onValueChange={([v]) => setMaxQuestions(v)}
+              min={3}
+              max={30}
+              step={1}
+              data-testid="slider-max-questions"
+            />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            ~{estMinutes} min estimated. Agent may finish sooner.
+          </p>
+        </div>
+      </div>
+
       {/* Knowledge Base */}
       <div className="space-y-3">
         <Label className="flex items-center gap-1.5">
           <BookOpen className="h-3.5 w-3.5" />
-          Knowledge Base
+          Knowledge Base *
         </Label>
         <p className="text-xs text-muted-foreground -mt-1">
-          Add entries that inform the agent's questioning strategy. This could
-          be background research, candidate resumes, company info, technical
-          specs — anything the agent should know but not reveal directly.
+          Add entries that inform the agent's questioning strategy. Background research,
+          company context, technical specs — anything the agent should know but not reveal.
         </p>
 
         {entries.map((entry, i) => (
@@ -146,7 +263,7 @@ export function SetupPanel({ onSessionCreated }: Props) {
               </Button>
             )}
             <Input
-              placeholder="Label (e.g. 'Candidate Resume', 'Technical Requirements')"
+              placeholder="Label (e.g. 'Company Background', 'Strategic Priorities')"
               value={entry.label}
               onChange={(e) => updateEntry(i, "label", e.target.value)}
               data-testid={`input-entry-label-${i}`}
@@ -170,6 +287,39 @@ export function SetupPanel({ onSessionCreated }: Props) {
           <Plus className="h-3.5 w-3.5 mr-1.5" />
           Add Knowledge Entry
         </Button>
+      </div>
+
+      {/* Custom Script */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <Label className="flex items-center gap-1.5">
+            <FileText className="h-3.5 w-3.5" />
+            Interview Script
+          </Label>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setShowScript(!showScript)}
+            className="text-xs"
+            data-testid="button-toggle-script"
+          >
+            {showScript ? "Hide" : "Customize"}
+          </Button>
+        </div>
+        {!showScript && (
+          <p className="text-xs text-muted-foreground">
+            A default invite script will be generated automatically. Click "Customize" to write your own.
+          </p>
+        )}
+        {showScript && (
+          <Textarea
+            placeholder="Write a custom invitation script for the interviewee. Leave blank to auto-generate."
+            value={customScript}
+            onChange={(e) => setCustomScript(e.target.value)}
+            rows={6}
+            data-testid="input-custom-script"
+          />
+        )}
       </div>
 
       {/* Submit */}

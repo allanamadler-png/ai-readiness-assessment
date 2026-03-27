@@ -1,38 +1,29 @@
 import { useState } from "react";
 import { SetupPanel } from "@/components/SetupPanel";
-import { InterviewChat } from "@/components/InterviewChat";
-import { SessionList } from "@/components/SessionList";
+import { SessionDashboard } from "@/components/SessionDashboard";
 import type { Session } from "@shared/schema";
 import { PerplexityAttribution } from "@/components/PerplexityAttribution";
-import { MessageSquare, Plus, ChevronLeft } from "lucide-react";
+import { Plus, ChevronLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useLocation } from "wouter";
 
 export default function Home() {
-  const [activeSession, setActiveSession] = useState<Session | null>(null);
-  const [view, setView] = useState<"list" | "setup" | "interview">("list");
+  const [, navigate] = useLocation();
+  const [showSetup, setShowSetup] = useState(false);
 
   const handleSessionCreated = (session: Session) => {
-    setActiveSession(session);
-    setView("interview");
-  };
-
-  const handleSelectSession = (session: Session) => {
-    setActiveSession(session);
-    setView("interview");
+    navigate(`/interview/${session.id}`);
   };
 
   return (
     <div className="flex flex-col min-h-screen bg-background">
       {/* Header */}
       <header className="border-b border-border px-4 py-3 flex items-center gap-3 shrink-0">
-        {view !== "list" && (
+        {showSetup && (
           <Button
             variant="ghost"
             size="icon"
-            onClick={() => {
-              setView("list");
-              setActiveSession(null);
-            }}
+            onClick={() => setShowSetup(false)}
             data-testid="button-back"
             className="shrink-0"
           >
@@ -72,12 +63,12 @@ export default function Home() {
             Interview Agent
           </h1>
         </div>
-        {view === "list" && (
+        {!showSetup && (
           <Button
             variant="default"
             size="sm"
             className="ml-auto"
-            onClick={() => setView("setup")}
+            onClick={() => setShowSetup(true)}
             data-testid="button-new-session"
           >
             <Plus className="h-4 w-4 mr-1.5" />
@@ -88,17 +79,10 @@ export default function Home() {
 
       {/* Main Content */}
       <main className="flex-1 overflow-hidden">
-        {view === "list" && (
-          <SessionList
-            onSelect={handleSelectSession}
-            onNew={() => setView("setup")}
-          />
-        )}
-        {view === "setup" && (
+        {showSetup ? (
           <SetupPanel onSessionCreated={handleSessionCreated} />
-        )}
-        {view === "interview" && activeSession && (
-          <InterviewChat session={activeSession} />
+        ) : (
+          <SessionDashboard />
         )}
       </main>
 
